@@ -35,80 +35,92 @@ def preprocess_image(image):
     )
     return thresholded
 
+# Allow the user to select an area on the screen
+def select_screen_area():
+    screenshot = pyautogui.screenshot()
+    screenshot_np = np.array(screenshot)
+    screenshot_np = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2BGR)
+
+    # Let the user select the region
+    roi = cv2.selectROI("Select Region", screenshot_np, False, False)
+    cv2.destroyWindow("Select Region")
+    if roi == (0, 0, 0, 0):  # If no selection is made
+        return None
+    return roi
 
 # Function to capture, extract text, and simulate typing it on the keyboard
-def capture_and_extract_text_and_type(template_path):
+def capture_and_extract_text_and_type(template_path, roi):
     # Load the template image
     template = cv2.imread(template_path, cv2.IMREAD_GRAYSCALE)
     template = preprocess_image(template)
 
-    # Capture a screenshot of the entire screen
-    screenshot = pyautogui.screenshot()
-    screenshot_np = np.array(screenshot)
-    screenshot_processed = preprocess_image(screenshot_np)
+    while True:
+        # Capture a screenshot of the specified area
+        screenshot = pyautogui.screenshot(region=roi)
+        screenshot_np = np.array(screenshot)
+        screenshot_processed = preprocess_image(screenshot_np)
 
-    # Perform the template matching
-    best_match = None
-    best_loc = None
-    best_val = 0
-    for scale in np.linspace(0.5, 1.5, 10):  # Test scales from 50% to 150%
-        resized_template = cv2.resize(template, None, fx=scale, fy=scale, interpolation=cv2.INTER_LINEAR)
-        if resized_template.shape[0] > screenshot_processed.shape[0] or resized_template.shape[1] > screenshot_processed.shape[1]:
-            break
+        # Perform the template matching
+        best_match = None
+        best_loc = None
+        best_val = 0
+        for scale in np.linspace(0.5, 1.5, 10):  # Test scales from 50% to 150%
+            resized_template = cv2.resize(template, None, fx=scale, fy=scale, interpolation=cv2.INTER_LINEAR)
+            if resized_template.shape[0] > screenshot_processed.shape[0] or resized_template.shape[1] > screenshot_processed.shape[1]:
+                break
 
-        result = cv2.matchTemplate(screenshot_processed, resized_template, cv2.TM_CCOEFF_NORMED)
-        min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+            result = cv2.matchTemplate(screenshot_processed, resized_template, cv2.TM_CCOEFF_NORMED)
+            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
 
-        if max_val > best_val:
-            best_val = max_val
-            best_match = resized_template
-            best_loc = max_loc
+            if max_val > best_val:
+                best_val = max_val
+                best_match = resized_template
+                best_loc = max_loc
 
-    if best_val > 0.5:  # Adjust threshold for confidence
-        matched_top_left = best_loc
-        matched_bottom_right = (
-            matched_top_left[0] + best_match.shape[1],
-            matched_top_left[1] + best_match.shape[0],
-        )
+        if best_val > 0.68:  # Adjust threshold for confidence
+            matched_top_left = best_loc
+            matched_bottom_right = (
+                matched_top_left[0] + best_match.shape[1],
+                matched_top_left[1] + best_match.shape[0],
+            )
 
-        # Crop the region where the image was found
-        cropped_region = screenshot_np[
-            matched_top_left[1]:matched_bottom_right[1],
-            matched_top_left[0]:matched_bottom_right[0],
-        ]
+            # Crop the region where the image was found
+            cropped_region = screenshot_np[
+                matched_top_left[1]:matched_bottom_right[1],
+                matched_top_left[0]:matched_bottom_right[0],
+            ]
 
-        # Zoom in on the cropped region for better OCR accuracy
-        zoom_factor = 2
-        zoomed_in = cv2.resize(cropped_region, None, fx=zoom_factor, fy=zoom_factor, interpolation=cv2.INTER_LINEAR)
+            # Zoom in on the cropped region for better OCR accuracy
+            zoom_factor = 2
+            zoomed_in = cv2.resize(cropped_region, None, fx=zoom_factor, fy=zoom_factor, interpolation=cv2.INTER_LINEAR)
 
-        # Convert to a format suitable for OCR
-        zoomed_in_pil = Image.fromarray(zoomed_in)
-        extracted_text = pytesseract.image_to_string(zoomed_in_pil)
+            # Convert to a format suitable for OCR
+            zoomed_in_pil = Image.fromarray(zoomed_in)
+            extracted_text = pytesseract.image_to_string(zoomed_in_pil)
 
-        # Clean up the extracted text
-        extracted_text = extracted_text.strip()
+            # Clean up the extracted text
+            extracted_text = extracted_text.strip()
 
-        # Check if the text is already typed
-        if extracted_text not in previous_texts and extracted_text:
-            print("Extracted Text: ", extracted_text)
+            # Check if the text is already typed
+            if extracted_text not in previous_texts and extracted_text:
+                print("Extracted Text: ", extracted_text)
 
-            # Type out the extracted text letter by letter
-            for char in extracted_text:
-                pyautogui.write(char)
-                time.sleep(0.05)  # Delay between typing each character
-            pyautogui.press("enter")  # Press Enter after typing
+                # Type out the extracted text letter by letter
+                for char in extracted_text:
+                    pyautogui.write(char)
+                    time.sleep(0.05)  # Delay between typing each character
+                pyautogui.press("enter")  # Press Enter after typing
 
-            # Add the text to the previously typed list
-            previous_texts.append(extracted_text)
+                # Add the text to the previously typed list
+                previous_texts.append(extracted_text)
 
-    # Introduce a small delay between checks (e.g., 0.5 seconds)
-    time.sleep(10)
+        # Introduce a small delay between checks
+        time.sleep(10)
 
-
-# Function to type `/gen roblox` every 63 seconds
+# Function to type /gen roblox every 63 seconds
 def type_command():
     while True:
-        time.sleep(61)
+        time.sleep(63)
         for char in "/gen epicgames":
             pyautogui.write(char)
             time.sleep(0.05)  # Delay between typing each character
@@ -118,10 +130,14 @@ def type_command():
 command_thread = threading.Thread(target=type_command, daemon=True)
 command_thread.start()
 
+# Allow user to select screen area
+print("Select the area to monitor...")
+roi = select_screen_area()
+if roi is None:
+    print("No area selected. Exiting.")
+else:
+    # Path to the template image you want to find
+    template_path = r'C:\Users\salmi\OneDrive\Desktop\yus.png'  # Replace with your image path
 
-# Path to the template image you want to find
-template_path = r'C:\Users\salmi\OneDrive\Desktop\yus.png'  # Replace with your image path
-
-# Continuously search for the image and type the text when a new match is found
-while True:
-    capture_and_extract_text_and_type(template_path)
+    # Continuously search for the image and type the text when a new match is found
+    capture_and_extract_text_and_type(template_path, roi)
